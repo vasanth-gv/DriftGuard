@@ -3,9 +3,9 @@ pipeline {
     agent any
 
     environment {
-        AWS_ACCESS_KEY_ID     = credentials('aws-driftguard')
+        AWS_ACCESS_KEY_ID = credentials('aws-driftguard')
         AWS_SECRET_ACCESS_KEY = credentials('aws-driftguard')
-        AWS_DEFAULT_REGION    = 'ap-south-1'
+        AWS_DEFAULT_REGION = 'ap-south-1'
     }
 
     stages {
@@ -25,7 +25,9 @@ pipeline {
 
         stage('AWS Authentication') {
             steps {
-                bat 'venv\\Scripts\\python -c "import boto3; print(boto3.client(''sts'').get_caller_identity()[''Arn''])"'
+                bat '''
+                venv\\Scripts\\python -c "import boto3; print(boto3.client('sts').get_caller_identity()['Arn'])"
+                '''
             }
         }
 
