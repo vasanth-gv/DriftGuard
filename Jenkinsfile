@@ -4,6 +4,7 @@ pipeline {
 
     environment {
         AWS_DEFAULT_REGION = 'ap-south-1'
+        PYTHONIOENCODING = 'utf-8'
     }
 
     stages {
@@ -55,9 +56,17 @@ pipeline {
 
         stage('Risk Analysis') {
             steps {
-                bat '''
-                venv\\Scripts\\python detector\\risk_engine.py
-                '''
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'aws-driftguard',
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    )
+                ]) {
+                    bat '''
+                    venv\\Scripts\\python detector\\risk_engine.py
+                    '''
+                }
             }
         }
     }
