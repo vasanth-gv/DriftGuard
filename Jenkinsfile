@@ -69,6 +69,14 @@ pipeline {
                 }
             }
         }
+
+        stage('Security Gate') {
+            steps {
+                bat '''
+                venv\\Scripts\\python -c "import json,sys; r=json.load(open('reports/drift_report.json')); print('Security Gate: '+r['status']); print('Risk Level: '+r['risk']['level']); print('Risk Score: '+str(r['risk']['score'])); sys.exit(1 if r['status']=='DRIFT_DETECTED' else 0)"
+                '''
+            }
+        }
     }
 
     post {
