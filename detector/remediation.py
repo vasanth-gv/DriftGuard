@@ -6,7 +6,11 @@ SECURITY_GROUP_NAME = "driftguard-web-sg"
 
 
 def remove_rule(rule):
-    ec2 = boto3.client("ec2", region_name=REGION)
+
+    ec2 = boto3.client(
+        "ec2",
+        region_name=REGION
+    )
 
     response = ec2.describe_security_groups(
         Filters=[
@@ -16,6 +20,11 @@ def remove_rule(rule):
             }
         ]
     )
+
+    if not response["SecurityGroups"]:
+        raise Exception(
+            f"Security group '{SECURITY_GROUP_NAME}' not found"
+        )
 
     security_group = response["SecurityGroups"][0]
 
@@ -30,13 +39,17 @@ def remove_rule(rule):
         ]
     }
 
-    print("\n========================================")
+    print()
+    print("=" * 45)
     print("       DRIFTGUARD REMEDIATION")
-    print("========================================")
+    print("=" * 45)
 
     print(f"Resource : {SECURITY_GROUP_NAME}")
     print(f"Protocol : {rule['protocol']}")
-    print(f"Port     : {rule['from_port']}")
+    print(
+        f"Port     : "
+        f"{rule['from_port']}-{rule['to_port']}"
+    )
     print(f"Source   : {rule['cidr']}")
 
     ec2.revoke_security_group_ingress(
@@ -44,14 +57,27 @@ def remove_rule(rule):
         IpPermissions=[permission]
     )
 
-    print("\n✅ Unauthorized rule removed successfully.")
+    print()
+    print("SUCCESS: Unauthorized rule removed.")
 
 
 def main():
-    parser = argparse.ArgumentParser()
 
-    parser.add_argument("--approve", action="store_true")
-    parser.add_argument("--cidr", required=True)
+    parser = argparse.ArgumentParser(
+        description="DriftGuard Security Group Remediation"
+    )
+
+    parser.add_argument(
+        "--approve",
+        action="store_true",
+        help="Authorize AWS remediation"
+    )
+
+    parser.add_argument(
+        "--cidr",
+        required=True,
+        help="CIDR block of the unauthorized rule"
+    )
 
     args = parser.parse_args()
 
@@ -63,10 +89,20 @@ def main():
     }
 
     if not args.approve:
-        print("⏳ APPROVAL REQUIRED")
+
+        print()
+        print("APPROVAL REQUIRED")
         print("No AWS changes will be made.")
-        print(f"\nPlanned removal: SSH 22 → {args.cidr}")
-        print("\nUse --approve to authorize remediation.")
+
+        print()
+        print(
+            f"Planned removal: "
+            f"SSH 22 -> {args.cidr}"
+        )
+
+        print()
+        print("Use --approve to authorize remediation.")
+
         return
 
     remove_rule(rule)

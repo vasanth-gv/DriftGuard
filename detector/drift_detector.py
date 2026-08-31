@@ -6,8 +6,9 @@ from risk_engine import calculate_risk
 
 REGION = "ap-south-1"
 
-
-EXPECTED_CONFIG = Path(__file__).resolve().parent.parent / "expected_config.json"
+EXPECTED_CONFIG = (
+    Path(__file__).resolve().parent.parent / "expected_config.json"
+)
 
 ec2 = boto3.client("ec2", region_name=REGION)
 
@@ -28,7 +29,9 @@ def get_security_group(name):
     )
 
     if not response["SecurityGroups"]:
-        raise Exception(f"Security group '{name}' not found")
+        raise Exception(
+            f"Security group '{name}' not found"
+        )
 
     return response["SecurityGroups"][0]
 
@@ -37,17 +40,21 @@ def get_actual_rules(security_group):
     rules = []
 
     for permission in security_group["IpPermissions"]:
+
         protocol = permission.get("IpProtocol")
         from_port = permission.get("FromPort")
         to_port = permission.get("ToPort")
 
         for ip_range in permission.get("IpRanges", []):
-            rules.append({
-                "protocol": protocol,
-                "from_port": from_port,
-                "to_port": to_port,
-                "cidr": ip_range["CidrIp"]
-            })
+
+            rules.append(
+                {
+                    "protocol": protocol,
+                    "from_port": from_port,
+                    "to_port": to_port,
+                    "cidr": ip_range["CidrIp"]
+                }
+            )
 
     return rules
 
@@ -62,15 +69,25 @@ def normalize(rule):
 
 
 def detect_drift(expected_rules, actual_rules):
-    expected = {normalize(rule) for rule in expected_rules}
-    actual = {normalize(rule) for rule in actual_rules}
+
+    expected = {
+        normalize(rule)
+        for rule in expected_rules
+    }
+
+    actual = {
+        normalize(rule)
+        for rule in actual_rules
+    }
 
     added = actual - expected
     removed = expected - actual
 
     return added, removed
 
+
 def get_rule_data(rule):
+
     return {
         "protocol": rule[0],
         "from_port": rule[1],
@@ -78,14 +95,29 @@ def get_rule_data(rule):
         "cidr": rule[3]
     }
 
+
+def print_risk(rule):
+
+    rule_data = get_rule_data(rule)
+
+    risk = calculate_risk(rule_data)
+
+    print(f"    Risk Level : {risk['level']}")
+    print(f"    Risk Score : {risk['score']}")
+    print(f"    Reason     : {risk['reason']}")
+
+
 def main():
+
     config = load_expected_config()
 
     security_group = get_security_group(
         config["security_group"]
     )
 
-    actual_rules = get_actual_rules(security_group)
+    actual_rules = get_actual_rules(
+        security_group
+    )
 
     added, removed = detect_drift(
         config["inbound_rules"],
@@ -96,32 +128,55 @@ def main():
     print("             DRIFTGUARD SCAN")
     print("=" * 55)
 
-    print(f"Resource : {security_group['GroupName']}")
-    print(f"Region   : {REGION}")
+    print(
+        f"Resource : {security_group['GroupName']}"
+    )
 
+    print(
+        f"Region   : {REGION}"
+    )
+
+    # No drift
     if not added and not removed:
+
         print("\nSTATUS: NO DRIFT")
+
         return
 
-    print("\nSTATUS:  DRIFT DETECTED")
+    # Drift detected
+    print("\nSTATUS: DRIFT DETECTED")
 
+    # Unauthorized rules
     if added:
+
         print("\nUnauthorized / Added Rules:")
+
         for rule in sorted(added):
+
             print(
                 f"  {rule[0]} "
                 f"{rule[1]}-{rule[2]} "
                 f"{rule[3]}"
             )
 
+            print_risk(rule)
+
+    # Missing expected rules
     if removed:
+
         print("\nMissing Expected Rules:")
+
         for rule in sorted(removed):
+
             print(
                 f"  {rule[0]} "
                 f"{rule[1]}-{rule[2]} "
                 f"{rule[3]}"
             )
+
+            print("    Risk Level : HIGH")
+            print("    Risk Score : 75")
+            print("    Reason     : Expected rule is missing")
 
 
 if __name__ == "__main__":
