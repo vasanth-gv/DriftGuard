@@ -100,10 +100,10 @@ def main():
     print(f"Region   : {REGION}")
 
     if not added and not removed:
-        print("\nSTATUS: ✅ NO DRIFT")
+        print("\nSTATUS: NO DRIFT")
         return
 
-    print("\nSTATUS: 🚨 DRIFT DETECTED")
+    print("\nSTATUS:  DRIFT DETECTED")
 
     if added:
         print("\nUnauthorized / Added Rules:")
