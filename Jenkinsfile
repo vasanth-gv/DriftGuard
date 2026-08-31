@@ -2,12 +2,6 @@ pipeline {
 
     agent any
 
-    environment {
-        AWS_ACCESS_KEY_ID = credentials('aws-driftguard')
-        AWS_SECRET_ACCESS_KEY = credentials('aws-driftguard')
-        AWS_DEFAULT_REGION = 'ap-south-1'
-    }
-
     stages {
 
         stage('Checkout') {
@@ -25,15 +19,35 @@ pipeline {
 
         stage('AWS Authentication') {
             steps {
-                bat '''
-                venv\\Scripts\\python -c "import boto3; print(boto3.client('sts').get_caller_identity()['Arn'])"
-                '''
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'aws-driftguard',
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    )
+                ]) {
+                    bat '''
+                    set AWS_DEFAULT_REGION=ap-south-1
+                    venv\\Scripts\\python -c "import boto3; print(boto3.client('sts', region_name='ap-south-1').get_caller_identity()['Arn'])"
+                    '''
+                }
             }
         }
 
         stage('Drift Detection') {
             steps {
-                bat 'venv\\Scripts\\python detector\\drift_detector.py'
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'aws-driftguard',
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    )
+                ]) {
+                    bat '''
+                    set AWS_DEFAULT_REGION=ap-south-1
+                    venv\\Scripts\\python detector\\drift_detector.py
+                    '''
+                }
             }
         }
 
