@@ -1,0 +1,12 @@
+{
+    "resource": "driftguard-web-sg",
+    "region": "ap-south-1",
+    "status": "NO_DRIFT",
+    "added_rules": [],
+    "removed_rules": [],
+    "risk": {
+        "level": "LOW",
+        "score": 0,
+        "reason": "No security risk detected"
+    }
+}

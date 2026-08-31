@@ -2,6 +2,10 @@ pipeline {
 
     agent any
 
+    environment {
+        AWS_DEFAULT_REGION = 'ap-south-1'
+    }
+
     stages {
 
         stage('Checkout') {
@@ -27,7 +31,6 @@ pipeline {
                     )
                 ]) {
                     bat '''
-                    set AWS_DEFAULT_REGION=ap-south-1
                     venv\\Scripts\\python -c "import boto3; print(boto3.client('sts', region_name='ap-south-1').get_caller_identity()['Arn'])"
                     '''
                 }
@@ -44,7 +47,6 @@ pipeline {
                     )
                 ]) {
                     bat '''
-                    set AWS_DEFAULT_REGION=ap-south-1
                     venv\\Scripts\\python detector\\drift_detector.py
                     '''
                 }
@@ -53,13 +55,18 @@ pipeline {
 
         stage('Risk Analysis') {
             steps {
-                bat 'venv\\Scripts\\python detector\\risk_engine.py'
+                bat '''
+                venv\\Scripts\\python detector\\risk_engine.py
+                '''
             }
         }
     }
 
     post {
         always {
+            archiveArtifacts artifacts: 'reports/drift_report.json',
+                             allowEmptyArchive: true
+
             echo 'DriftGuard pipeline execution completed.'
         }
     }

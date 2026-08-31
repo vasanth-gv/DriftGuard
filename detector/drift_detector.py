@@ -10,6 +10,12 @@ EXPECTED_CONFIG = (
     Path(__file__).resolve().parent.parent / "expected_config.json"
 )
 
+REPORT_DIR = (
+    Path(__file__).resolve().parent.parent / "reports"
+)
+
+REPORT_FILE = REPORT_DIR / "drift_report.json"
+
 ec2 = boto3.client("ec2", region_name=REGION)
 
 
@@ -40,13 +46,11 @@ def get_actual_rules(security_group):
     rules = []
 
     for permission in security_group["IpPermissions"]:
-
         protocol = permission.get("IpProtocol")
         from_port = permission.get("FromPort")
         to_port = permission.get("ToPort")
 
         for ip_range in permission.get("IpRanges", []):
-
             rules.append(
                 {
                     "protocol": protocol,
@@ -87,7 +91,6 @@ def detect_drift(expected_rules, actual_rules):
 
 
 def get_rule_data(rule):
-
     return {
         "protocol": rule[0],
         "from_port": rule[1],
@@ -96,15 +99,143 @@ def get_rule_data(rule):
     }
 
 
-def print_risk(rule):
+def create_report(
+    security_group,
+    added,
+    removed
+):
 
-    rule_data = get_rule_data(rule)
+    added_rules = []
+    removed_rules = []
 
-    risk = calculate_risk(rule_data)
+    highest_score = 0
+    highest_risk = {
+        "level": "LOW",
+        "score": 0,
+        "reason": "No security risk detected"
+    }
 
-    print(f"    Risk Level : {risk['level']}")
-    print(f"    Risk Score : {risk['score']}")
-    print(f"    Reason     : {risk['reason']}")
+    for rule in sorted(added):
+
+        rule_data = get_rule_data(rule)
+        risk = calculate_risk(rule_data)
+
+        added_rules.append(
+            {
+                **rule_data,
+                "risk": risk
+            }
+        )
+
+        if risk["score"] > highest_score:
+            highest_score = risk["score"]
+            highest_risk = risk
+
+    for rule in sorted(removed):
+
+        rule_data = get_rule_data(rule)
+
+        removed_rules.append(rule_data)
+
+    if added or removed:
+        status = "DRIFT_DETECTED"
+    else:
+        status = "NO_DRIFT"
+
+    report = {
+        "resource": security_group["GroupName"],
+        "region": REGION,
+        "status": status,
+        "added_rules": added_rules,
+        "removed_rules": removed_rules,
+        "risk": highest_risk
+    }
+
+    REPORT_DIR.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    with open(REPORT_FILE, "w") as file:
+        json.dump(
+            report,
+            file,
+            indent=4
+        )
+
+    return report
+
+
+def print_scan(report):
+
+    print("=" * 55)
+    print("             DRIFTGUARD SCAN")
+    print("=" * 55)
+
+    print(
+        f"Resource : {report['resource']}"
+    )
+
+    print(
+        f"Region   : {report['region']}"
+    )
+
+    if report["status"] == "NO_DRIFT":
+
+        print("\nSTATUS: NO DRIFT")
+
+    else:
+
+        print("\nSTATUS: DRIFT DETECTED")
+
+        if report["added_rules"]:
+
+            print(
+                "\nUnauthorized / Added Rules:"
+            )
+
+            for rule in report["added_rules"]:
+
+                print(
+                    f"  {rule['protocol']} "
+                    f"{rule['from_port']}-"
+                    f"{rule['to_port']} "
+                    f"{rule['cidr']}"
+                )
+
+                print(
+                    f"    Risk Level : "
+                    f"{rule['risk']['level']}"
+                )
+
+                print(
+                    f"    Risk Score : "
+                    f"{rule['risk']['score']}"
+                )
+
+                print(
+                    f"    Reason     : "
+                    f"{rule['risk']['reason']}"
+                )
+
+        if report["removed_rules"]:
+
+            print(
+                "\nMissing Expected Rules:"
+            )
+
+            for rule in report["removed_rules"]:
+
+                print(
+                    f"  {rule['protocol']} "
+                    f"{rule['from_port']}-"
+                    f"{rule['to_port']} "
+                    f"{rule['cidr']}"
+                )
+
+    print(
+        f"\nReport saved: {REPORT_FILE}"
+    )
 
 
 def main():
@@ -124,59 +255,13 @@ def main():
         actual_rules
     )
 
-    print("=" * 55)
-    print("             DRIFTGUARD SCAN")
-    print("=" * 55)
-
-    print(
-        f"Resource : {security_group['GroupName']}"
+    report = create_report(
+        security_group,
+        added,
+        removed
     )
 
-    print(
-        f"Region   : {REGION}"
-    )
-
-    # No drift
-    if not added and not removed:
-
-        print("\nSTATUS: NO DRIFT")
-
-        return
-
-    # Drift detected
-    print("\nSTATUS: DRIFT DETECTED")
-
-    # Unauthorized rules
-    if added:
-
-        print("\nUnauthorized / Added Rules:")
-
-        for rule in sorted(added):
-
-            print(
-                f"  {rule[0]} "
-                f"{rule[1]}-{rule[2]} "
-                f"{rule[3]}"
-            )
-
-            print_risk(rule)
-
-    # Missing expected rules
-    if removed:
-
-        print("\nMissing Expected Rules:")
-
-        for rule in sorted(removed):
-
-            print(
-                f"  {rule[0]} "
-                f"{rule[1]}-{rule[2]} "
-                f"{rule[3]}"
-            )
-
-            print("    Risk Level : HIGH")
-            print("    Risk Score : 75")
-            print("    Reason     : Expected rule is missing")
+    print_scan(report)
 
 
 if __name__ == "__main__":
