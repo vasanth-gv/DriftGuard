@@ -70,6 +70,85 @@ pipeline {
             }
         }
 
+        stage('Email Alert') {
+            steps {
+                script {
+
+                    def result = bat(
+                        script: '''
+                        @echo off
+                        venv\\Scripts\\python -c "import json; r=json.load(open('reports/drift_report.json')); print(r['status']); print(r['risk']['level']); print(r['risk']['score'])"
+                        ''',
+                        returnStdout: true
+                    ).trim()
+
+                    def lines = result.readLines()
+
+                    def status = lines[-3]
+                    def riskLevel = lines[-2]
+                    def riskScore = lines[-1]
+
+                    echo "Drift Status: ${status}"
+                    echo "Risk Level: ${riskLevel}"
+                    echo "Risk Score: ${riskScore}"
+
+                    if (status == 'DRIFT_DETECTED') {
+
+                        emailext(
+                            to: 'guru08092004ff@gmail.com',
+                            subject: "🚨 DriftGuard Alert - ${riskLevel} Risk",
+                            mimeType: 'text/html',
+                            body: """
+                                <html>
+                                <body>
+
+                                <h2>🚨 DriftGuard Security Alert</h2>
+
+                                <p><b>Status:</b> ${status}</p>
+                                <p><b>Risk Level:</b> ${riskLevel}</p>
+                                <p><b>Risk Score:</b> ${riskScore}</p>
+
+                                <hr>
+
+                                <h3>Unauthorized Infrastructure Change Detected</h3>
+
+                                <p>
+                                DriftGuard detected an unauthorized change
+                                in the AWS infrastructure.
+                                </p>
+
+                                <p>
+                                <b>Jenkins Build:</b> #${env.BUILD_NUMBER}
+                                </p>
+
+                                <p>
+                                Please review the attached
+                                <b>drift_report.json</b>.
+                                </p>
+
+                                <hr>
+
+                                <p>
+                                <b>DriftGuard CI/CD Security Pipeline</b>
+                                </p>
+
+                                </body>
+                                </html>
+                            """,
+                            attachmentsPattern: 'reports/drift_report.json'
+                        )
+
+                        echo '🚨 Drift detected - Email alert sent successfully.'
+
+                    } else {
+
+                        echo '✅ No drift detected - Email alert skipped.'
+
+                    }
+                }
+            }
+        }
+
         stage('Security Gate') {
             steps {
                 bat '''
@@ -81,6 +160,7 @@ pipeline {
 
     post {
         always {
+
             archiveArtifacts artifacts: 'reports/drift_report.json',
                              allowEmptyArchive: true
 
