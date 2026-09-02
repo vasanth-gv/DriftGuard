@@ -3,413 +3,351 @@ pipeline {
     agent any
 
     environment {
-
         AWS_DEFAULT_REGION = 'ap-south-1'
+        PYTHONIOENCODING   = 'utf-8'
 
-        PYTHONIOENCODING = 'utf-8'
-
-        // IMPORTANT:
-        // Change this to the Gmail address where you want
-        // to receive the DriftGuard alert.
-        EMAIL_TO = 'guruvasanth097@gmail.com'
-
-        EMAIL_FROM = 'guru08092004ff@gmail.com'
+        EMAIL_TO   = 'guruvasanth097@gmail.com'
+        EMAIL_FROM = 'guruvasanth097@gmail.com'
     }
 
     stages {
 
-        // =====================================================
-        // 1. CHECKOUT
-        // =====================================================
-
         stage('Checkout') {
-
             steps {
-
                 checkout scm
-
             }
         }
-
-
-        // =====================================================
-        // 2. PYTHON SETUP
-        // =====================================================
 
         stage('Python Setup') {
-
             steps {
-
                 bat '''
-                python -m venv venv
-                '''
+                    if not exist venv (
+                        python -m venv venv
+                    )
 
-                bat '''
-                venv\\Scripts\\python -m pip install -r requirements.txt
+                    venv\\Scripts\\python -m pip install --upgrade pip
+                    venv\\Scripts\\pip install -r requirements.txt
                 '''
-
             }
         }
-
-
-        // =====================================================
-        // 3. AWS AUTHENTICATION
-        // =====================================================
 
         stage('AWS Authentication') {
-
             steps {
-
                 withCredentials([
-
                     usernamePassword(
                         credentialsId: 'aws-driftguard',
                         usernameVariable: 'AWS_ACCESS_KEY_ID',
                         passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                     )
-
                 ]) {
-
                     bat '''
-                    venv\\Scripts\\python -c "import boto3; print(boto3.client('sts', region_name='ap-south-1').get_caller_identity()['Arn'])"
+                        venv\\Scripts\\python -c "import boto3; print(boto3.client('sts').get_caller_identity()['Arn'])"
                     '''
-
                 }
-
             }
         }
-
-
-        // =====================================================
-        // 4. DRIFT DETECTION
-        // =====================================================
 
         stage('Drift Detection') {
-
             steps {
-
                 withCredentials([
-
                     usernamePassword(
                         credentialsId: 'aws-driftguard',
                         usernameVariable: 'AWS_ACCESS_KEY_ID',
                         passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                     )
-
                 ]) {
-
                     bat '''
-                    venv\\Scripts\\python detector\\drift_detector.py
+                        venv\\Scripts\\python detector\\drift_detector.py
                     '''
-
                 }
-
             }
         }
-
-
-        // =====================================================
-        // 5. RISK ANALYSIS
-        // =====================================================
 
         stage('Risk Analysis') {
-
             steps {
+                script {
 
-                withCredentials([
+                    def reportStatus = bat(
+                        script: '''
+                            venv\\Scripts\\python -c "import json; d=json.load(open('reports/drift_report.json')); print(d.get('status','UNKNOWN'))"
+                        ''',
+                        returnStdout: true
+                    ).trim()
 
-                    usernamePassword(
-                        credentialsId: 'aws-driftguard',
-                        usernameVariable: 'AWS_ACCESS_KEY_ID',
-                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
-                    )
+                    def riskLevel = bat(
+                        script: '''
+                            venv\\Scripts\\python -c "import json; d=json.load(open('reports/drift_report.json')); print(d.get('risk_level','LOW'))"
+                        ''',
+                        returnStdout: true
+                    ).trim()
 
-                ]) {
+                    def riskScore = bat(
+                        script: '''
+                            venv\\Scripts\\python -c "import json; d=json.load(open('reports/drift_report.json')); print(d.get('risk_score',0))"
+                        ''',
+                        returnStdout: true
+                    ).trim()
 
-                    bat '''
-                    venv\\Scripts\\python detector\\risk_engine.py
-                    '''
-
+                    echo "========================================"
+                    echo "        DRIFTGUARD RISK ANALYSIS"
+                    echo "========================================"
+                    echo "Drift Status : ${reportStatus}"
+                    echo "Risk Level   : ${riskLevel}"
+                    echo "Risk Score   : ${riskScore}"
+                    echo "========================================"
                 }
-
             }
         }
 
-
-        // =====================================================
-        // 6. EMAIL ALERT
-        // =====================================================
-
         stage('Email Alert') {
-
             steps {
-
                 script {
 
-                    // ---------------------------------------------
-                    // Read drift_report.json using Python
-                    // No Pipeline Utility Steps plugin required.
-                    // ---------------------------------------------
-
-                    def result = bat(
-
+                    def reportStatus = bat(
                         script: '''
-                        @echo off
-
-                        venv\\Scripts\\python -c "import json; r=json.load(open('reports/drift_report.json')); print(r['status']); print(r['risk']['level']); print(r['risk']['score'])"
-
+                            venv\\Scripts\\python -c "import json; d=json.load(open('reports/drift_report.json')); print(d.get('status','UNKNOWN'))"
                         ''',
-
                         returnStdout: true
-
                     ).trim()
 
+                    if (reportStatus == 'DRIFT_DETECTED') {
 
-                    // ---------------------------------------------
-                    // Remove empty lines from Windows BAT output
-                    // ---------------------------------------------
+                        def riskLevel = bat(
+                            script: '''
+                                venv\\Scripts\\python -c "import json; d=json.load(open('reports/drift_report.json')); print(d.get('risk_level','HIGH'))"
+                            ''',
+                            returnStdout: true
+                        ).trim()
 
-                    def lines = result
-                        .readLines()
-                        .findAll { it != null && it.trim() != '' }
+                        def riskScore = bat(
+                            script: '''
+                                venv\\Scripts\\python -c "import json; d=json.load(open('reports/drift_report.json')); print(d.get('risk_score',0))"
+                            ''',
+                            returnStdout: true
+                        ).trim()
 
-
-                    // ---------------------------------------------
-                    // Last 3 lines contain:
-                    //
-                    // STATUS
-                    // RISK LEVEL
-                    // RISK SCORE
-                    // ---------------------------------------------
-
-                    if (lines.size() < 3) {
-
-                        error(
-                            "Unable to parse drift_report.json output. Output was: ${result}"
-                        )
-
-                    }
-
-
-                    def status = lines[-3].trim()
-
-                    def riskLevel = lines[-2].trim()
-
-                    def riskScore = lines[-1].trim()
-
-
-                    // ---------------------------------------------
-                    // Display results
-                    // ---------------------------------------------
-
-                    echo "========================================="
-
-                    echo "Drift Status: ${status}"
-
-                    echo "Risk Level: ${riskLevel}"
-
-                    echo "Risk Score: ${riskScore}"
-
-                    echo "========================================="
-
-
-                    // =================================================
-                    // DRIFT DETECTED
-                    // =================================================
-
-                    if (status == 'DRIFT_DETECTED') {
+                        def reportText = bat(
+                            script: '''
+                                venv\\Scripts\\python -c "import json; d=json.load(open('reports/drift_report.json')); print(json.dumps(d, indent=2))"
+                            ''',
+                            returnStdout: true
+                        ).trim()
 
                         try {
 
                             emailext(
-
                                 to: "${env.EMAIL_TO}",
-
                                 from: "${env.EMAIL_FROM}",
-
                                 replyTo: "${env.EMAIL_FROM}",
-
                                 subject: "DriftGuard ALERT - ${riskLevel} Risk - Build #${env.BUILD_NUMBER}",
-
                                 mimeType: 'text/html',
-
                                 body: """
+                                    <html>
+                                    <body>
 
-                                <html>
+                                    <h2>🚨 DriftGuard Security Alert</h2>
 
-                                <body>
+                                    <p><b>Drift detected in AWS infrastructure.</b></p>
 
-                                <h2>DriftGuard Security Alert</h2>
+                                    <table border="1" cellpadding="8" cellspacing="0">
+                                        <tr>
+                                            <td><b>Build</b></td>
+                                            <td>#${env.BUILD_NUMBER}</td>
+                                        </tr>
+                                        <tr>
+                                            <td><b>Status</b></td>
+                                            <td>DRIFT_DETECTED</td>
+                                        </tr>
+                                        <tr>
+                                            <td><b>Risk Level</b></td>
+                                            <td>${riskLevel}</td>
+                                        </tr>
+                                        <tr>
+                                            <td><b>Risk Score</b></td>
+                                            <td>${riskScore}</td>
+                                        </tr>
+                                    </table>
 
-                                <p>
-                                <b>Status:</b>
-                                ${status}
-                                </p>
+                                    <h3>Drift Report</h3>
 
-                                <p>
-                                <b>Risk Level:</b>
-                                ${riskLevel}
-                                </p>
+                                    <pre>${reportText}</pre>
 
-                                <p>
-                                <b>Risk Score:</b>
-                                ${riskScore}
-                                </p>
+                                    <p>
+                                        DriftGuard Security Gate blocked the deployment
+                                        because unauthorized infrastructure changes were detected.
+                                    </p>
 
-                                <hr>
-
-                                <h3>
-                                Unauthorized Infrastructure Change Detected
-                                </h3>
-
-                                <p>
-                                DriftGuard detected an unauthorized
-                                infrastructure change in AWS.
-                                </p>
-
-                                <p>
-                                <b>AWS Region:</b>
-                                ${env.AWS_DEFAULT_REGION}
-                                </p>
-
-                                <p>
-                                <b>Jenkins Job:</b>
-                                ${env.JOB_NAME}
-                                </p>
-
-                                <p>
-                                <b>Jenkins Build:</b>
-                                #${env.BUILD_NUMBER}
-                                </p>
-
-                                <p>
-                                <b>Build URL:</b>
-                                ${env.BUILD_URL}
-                                </p>
-
-                                <hr>
-
-                                <h3>Security Action</h3>
-
-                                <p>
-                                The DriftGuard Security Gate has blocked
-                                the pipeline because unauthorized
-                                infrastructure drift was detected.
-                                </p>
-
-                                <hr>
-
-                                <p>
-                                <b>DriftGuard CI/CD Security Pipeline</b>
-                                </p>
-
-                                </body>
-
-                                </html>
-
+                                    </body>
+                                    </html>
                                 """
-
                             )
 
-
-                            echo "========================================="
-
-                            echo "DRIFT DETECTED"
-
                             echo "Email alert submitted successfully."
-
                             echo "Recipient: ${env.EMAIL_TO}"
 
-                            echo "========================================="
+                        } catch (Exception e) {
 
+                            echo "WARNING: Email alert failed."
+                            echo "Reason: ${e.getMessage()}"
+                            echo "Continuing with Discord alert and Security Gate."
                         }
 
+                    } else {
 
-                        catch (Exception e) {
-
-                            echo "========================================="
-
-                            echo "EMAIL ALERT FAILED"
-
-                            echo "Error: ${e.getMessage()}"
-
-                            echo "========================================="
-
-                            echo "Security Gate will still evaluate the drift."
-
-                        }
-
+                        echo "NO_DRIFT - Email alert skipped."
                     }
-
-
-                    // =================================================
-                    // NO DRIFT
-                    // =================================================
-
-                    else {
-
-                        echo "========================================="
-
-                        echo "NO DRIFT DETECTED"
-
-                        echo "Email alert skipped."
-
-                        echo "========================================="
-
-                    }
-
                 }
-
             }
-
         }
 
+        stage('Discord Alert') {
+            steps {
+                script {
 
-        // =====================================================
-        // 7. SECURITY GATE
-        // =====================================================
+                    def reportStatus = bat(
+                        script: '''
+                            venv\\Scripts\\python -c "import json; d=json.load(open('reports/drift_report.json')); print(d.get('status','UNKNOWN'))"
+                        ''',
+                        returnStdout: true
+                    ).trim()
+
+                    if (reportStatus == 'DRIFT_DETECTED') {
+
+                        def riskLevel = bat(
+                            script: '''
+                                venv\\Scripts\\python -c "import json; d=json.load(open('reports/drift_report.json')); print(d.get('risk_level','HIGH'))"
+                            ''',
+                            returnStdout: true
+                        ).trim()
+
+                        def riskScore = bat(
+                            script: '''
+                                venv\\Scripts\\python -c "import json; d=json.load(open('reports/drift_report.json')); print(d.get('risk_score',0))"
+                            ''',
+                            returnStdout: true
+                        ).trim()
+
+                        withCredentials([
+                            string(
+                                credentialsId: 'discord-webhook',
+                                variable: 'DISCORD_WEBHOOK'
+                            )
+                        ]) {
+
+                            def discordMessage = """
+🚨 **DRIFTGUARD SECURITY ALERT**
+
+**Status:** DRIFT DETECTED
+**Resource:** driftguard-web-sg
+**Region:** ap-south-1
+**Risk Level:** ${riskLevel}
+**Risk Score:** ${riskScore}
+**Jenkins Build:** #${env.BUILD_NUMBER}
+
+Unauthorized infrastructure changes were detected.
+
+🔴 Security Gate will block this build.
+"""
+
+                            writeFile(
+                                file: 'discord_payload.json',
+                                text: groovy.json.JsonOutput.toJson([
+                                    content: discordMessage
+                                ])
+                            )
+
+                            bat '''
+                                curl -s -X POST ^
+                                -H "Content-Type: application/json" ^
+                                --data-binary "@discord_payload.json" ^
+                                "%DISCORD_WEBHOOK%"
+                            '''
+                        }
+
+                        echo "Discord alert sent successfully."
+
+                    } else {
+
+                        echo "NO_DRIFT - Discord alert skipped."
+                    }
+                }
+            }
+        }
 
         stage('Security Gate') {
-
             steps {
+                script {
 
-                bat '''
+                    def reportStatus = bat(
+                        script: '''
+                            venv\\Scripts\\python -c "import json; d=json.load(open('reports/drift_report.json')); print(d.get('status','UNKNOWN'))"
+                        ''',
+                        returnStdout: true
+                    ).trim()
 
-                venv\\Scripts\\python -c "import json,sys; r=json.load(open('reports/drift_report.json')); print('Security Gate: '+r['status']); print('Risk Level: '+r['risk']['level']); print('Risk Score: '+str(r['risk']['score'])); sys.exit(1 if r['status']=='DRIFT_DETECTED' else 0)"
+                    def riskLevel = bat(
+                        script: '''
+                            venv\\Scripts\\python -c "import json; d=json.load(open('reports/drift_report.json')); print(d.get('risk_level','LOW'))"
+                        ''',
+                        returnStdout: true
+                    ).trim()
 
-                '''
+                    def riskScore = bat(
+                        script: '''
+                            venv\\Scripts\\python -c "import json; d=json.load(open('reports/drift_report.json')); print(d.get('risk_score',0))"
+                        ''',
+                        returnStdout: true
+                    ).trim()
 
+                    echo "========================================"
+                    echo "           SECURITY GATE"
+                    echo "========================================"
+                    echo "Security Gate: ${reportStatus}"
+                    echo "Risk Level: ${riskLevel}"
+                    echo "Risk Score: ${riskScore}"
+                    echo "========================================"
+
+                    if (reportStatus == 'DRIFT_DETECTED') {
+
+                        error(
+                            "SECURITY GATE BLOCKED BUILD - ${riskLevel} risk detected (Score: ${riskScore})"
+                        )
+
+                    } else {
+
+                        echo "Security Gate PASSED - No drift detected."
+                    }
+                }
             }
         }
-
     }
-
-
-    // =========================================================
-    // POST ACTIONS
-    // =========================================================
 
     post {
 
         always {
-
             archiveArtifacts(
-
                 artifacts: 'reports/drift_report.json',
-
                 allowEmptyArchive: true
-
             )
 
-
-            echo "========================================="
-
-            echo "DriftGuard pipeline execution completed."
-
-            echo "========================================="
-
+            bat '''
+                if exist discord_payload.json del /f /q discord_payload.json
+            '''
         }
 
-    }
+        success {
+            echo "========================================"
+            echo " DriftGuard: BUILD SUCCESS"
+            echo " No infrastructure drift detected."
+            echo "========================================"
+        }
 
+        failure {
+            echo "========================================"
+            echo " DriftGuard: BUILD BLOCKED"
+            echo " Infrastructure drift detected."
+            echo " Check Jenkins + Discord alert."
+            echo "========================================"
+        }
+    }
 }
