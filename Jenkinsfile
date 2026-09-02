@@ -1,13 +1,16 @@
 pipeline {
-
     agent any
+
+    triggers {
+        cron('H/5 * * * *')
+    }
 
     environment {
         AWS_DEFAULT_REGION = 'ap-south-1'
-        PYTHONIOENCODING   = 'utf-8'
+        PYTHONIOENCODING = 'utf-8'
 
-        EMAIL_TO   = 'guru08092004ff@gmail.com'
-        EMAIL_FROM = 'guru08092004ff@gmail.com'
+        EMAIL_TO = 'guru08092004ff@gmail.com'
+        EMAIL_FROM = 'guruvasanth097@gmail.com'
     }
 
     stages {
@@ -40,7 +43,7 @@ pipeline {
                     )
                 ]) {
                     bat '''
-                        venv\\Scripts\\python -c "import boto3; print(boto3.client('sts').get_caller_identity()['Arn'])"
+                        @venv\\Scripts\\python -c "import boto3; print(boto3.client('sts').get_caller_identity()['Arn'])"
                     '''
                 }
             }
@@ -56,7 +59,7 @@ pipeline {
                     )
                 ]) {
                     bat '''
-                        venv\\Scripts\\python detector\\drift_detector.py
+                        @venv\\Scripts\\python detector\\drift_detector.py
                     '''
                 }
             }
@@ -68,40 +71,44 @@ pipeline {
 
                     def status = bat(
                         script: '''
-                            @venv\\Scripts\\python -c "import json;d=json.load(open('reports/drift_report.json'));print(d['status'])"
+                            @venv\\Scripts\\python -c "import json; d=json.load(open('reports/drift_report.json')); print(d['status'])"
                         ''',
                         returnStdout: true
                     ).trim()
 
-                    def level = bat(
+                    def riskLevel = bat(
                         script: '''
-                            @venv\\Scripts\\python -c "import json;d=json.load(open('reports/drift_report.json'));print(d['risk']['level'])"
+                            @venv\\Scripts\\python -c "import json; d=json.load(open('reports/drift_report.json')); print(d['risk']['level'])"
                         ''',
                         returnStdout: true
                     ).trim()
 
-                    def score = bat(
+                    def riskScore = bat(
                         script: '''
-                            @venv\\Scripts\\python -c "import json;d=json.load(open('reports/drift_report.json'));print(d['risk']['score'])"
+                            @venv\\Scripts\\python -c "import json; d=json.load(open('reports/drift_report.json')); print(d['risk']['score'])"
                         ''',
                         returnStdout: true
                     ).trim()
 
                     def reason = bat(
                         script: '''
-                            @venv\\Scripts\\python -c "import json;d=json.load(open('reports/drift_report.json'));print(d['risk']['reason'])"
+                            @venv\\Scripts\\python -c "import json; d=json.load(open('reports/drift_report.json')); print(d['risk']['reason'])"
                         ''',
                         returnStdout: true
                     ).trim()
 
-                    echo "========================================"
-                    echo "      DRIFTGUARD RISK ANALYSIS"
-                    echo "========================================"
+                    echo '''
+========================================
+      DRIFTGUARD RISK ANALYSIS
+========================================
+'''
+
                     echo "Status      : ${status}"
-                    echo "Risk Level  : ${level}"
-                    echo "Risk Score  : ${score}"
+                    echo "Risk Level  : ${riskLevel}"
+                    echo "Risk Score  : ${riskScore}"
                     echo "Reason      : ${reason}"
-                    echo "========================================"
+
+                    echo '========================================'
                 }
             }
         }
@@ -112,7 +119,7 @@ pipeline {
 
                     def status = bat(
                         script: '''
-                            @venv\\Scripts\\python -c "import json;d=json.load(open('reports/drift_report.json'));print(d['status'])"
+                            @venv\\Scripts\\python -c "import json; print(json.load(open('reports/drift_report.json'))['status'])"
                         ''',
                         returnStdout: true
                     ).trim()
@@ -121,14 +128,21 @@ pipeline {
 
                         def level = bat(
                             script: '''
-                                @venv\\Scripts\\python -c "import json;d=json.load(open('reports/drift_report.json'));print(d['risk']['level'])"
+                                @venv\\Scripts\\python -c "import json; print(json.load(open('reports/drift_report.json'))['risk']['level'])"
                             ''',
                             returnStdout: true
                         ).trim()
 
                         def score = bat(
                             script: '''
-                                @venv\\Scripts\\python -c "import json;d=json.load(open('reports/drift_report.json'));print(d['risk']['score'])"
+                                @venv\\Scripts\\python -c "import json; print(json.load(open('reports/drift_report.json'))['risk']['score'])"
+                            ''',
+                            returnStdout: true
+                        ).trim()
+
+                        def reason = bat(
+                            script: '''
+                                @venv\\Scripts\\python -c "import json; print(json.load(open('reports/drift_report.json'))['risk']['reason'])"
                             ''',
                             returnStdout: true
                         ).trim()
@@ -136,69 +150,42 @@ pipeline {
                         try {
 
                             emailext(
-                                to: "${EMAIL_TO}",
-                                from: "${EMAIL_FROM}",
-                                subject: "🚨 DriftGuard Alert - ${level} Risk",
+                                to: "${env.EMAIL_TO}",
+                                from: "${env.EMAIL_FROM}",
+                                replyTo: "${env.EMAIL_FROM}",
+                                subject: "DriftGuard ALERT - ${level} Risk - Build #${env.BUILD_NUMBER}",
                                 mimeType: 'text/html',
                                 body: """
-                                <html>
-                                <body>
+                                    <h2>🚨 DriftGuard Security Alert</h2>
 
-                                <h2>🚨 DriftGuard Security Alert</h2>
+                                    <p><b>Status:</b> ${status}</p>
+                                    <p><b>Risk Level:</b> ${level}</p>
+                                    <p><b>Risk Score:</b> ${score}</p>
+                                    <p><b>Reason:</b> ${reason}</p>
 
-                                <table border="1" cellpadding="10">
+                                    <hr>
 
-                                <tr>
-                                <td>Status</td>
-                                <td><b>${status}</b></td>
-                                </tr>
+                                    <p><b>Resource:</b> driftguard-web-sg</p>
+                                    <p><b>Region:</b> ap-south-1</p>
+                                    <p><b>Jenkins Build:</b> #${env.BUILD_NUMBER}</p>
 
-                                <tr>
-                                <td>Risk Level</td>
-                                <td><b>${level}</b></td>
-                                </tr>
-
-                                <tr>
-                                <td>Risk Score</td>
-                                <td><b>${score}</b></td>
-                                </tr>
-
-                                <tr>
-                                <td>Resource</td>
-                                <td>driftguard-web-sg</td>
-                                </tr>
-
-                                <tr>
-                                <td>Region</td>
-                                <td>ap-south-1</td>
-                                </tr>
-
-                                <tr>
-                                <td>Build</td>
-                                <td>#${BUILD_NUMBER}</td>
-                                </tr>
-
-                                </table>
-
-                                <br>
-
-                                Unauthorized public inbound access detected.
-
-                                </body>
-                                </html>
+                                    <p>
+                                        <b>Action:</b>
+                                        Security Gate will block the build.
+                                    </p>
                                 """
                             )
 
-                            echo "Email alert submitted."
+                            echo 'Email alert submitted.'
 
-                        } catch(Exception e) {
-
-                            echo "Email failed but pipeline continues."
+                        } catch (Exception e) {
+                            echo "Email alert failed: ${e.message}"
                         }
 
                     } else {
 
-                        echo "NO_DRIFT - Email skipped."
+                        echo 'NO_DRIFT - Email skipped.'
+
                     }
                 }
             }
@@ -210,26 +197,48 @@ pipeline {
 
                     def status = bat(
                         script: '''
-                            @venv\\Scripts\\python -c "import json;d=json.load(open('reports/drift_report.json'));print(d['status'])"
+                            @venv\\Scripts\\python -c "import json; print(json.load(open('reports/drift_report.json'))['status'])"
                         ''',
                         returnStdout: true
                     ).trim()
 
-                    if(status == 'DRIFT_DETECTED') {
+                    if (status == 'DRIFT_DETECTED') {
 
                         def level = bat(
                             script: '''
-                                @venv\\Scripts\\python -c "import json;d=json.load(open('reports/drift_report.json'));print(d['risk']['level'])"
+                                @venv\\Scripts\\python -c "import json; print(json.load(open('reports/drift_report.json'))['risk']['level'])"
                             ''',
                             returnStdout: true
                         ).trim()
 
                         def score = bat(
                             script: '''
-                                @venv\\Scripts\\python -c "import json;d=json.load(open('reports/drift_report.json'));print(d['risk']['score'])"
+                                @venv\\Scripts\\python -c "import json; print(json.load(open('reports/drift_report.json'))['risk']['score'])"
                             ''',
                             returnStdout: true
                         ).trim()
+
+                        def reason = bat(
+                            script: '''
+                                @venv\\Scripts\\python -c "import json; print(json.load(open('reports/drift_report.json'))['risk']['reason'])"
+                            ''',
+                            returnStdout: true
+                        ).trim()
+
+                        def message = """🚨 **DriftGuard Security Alert**
+
+🔴 **Status:** ${status}
+⚠️ **Risk Level:** ${level}
+📊 **Risk Score:** ${score}
+
+🖥️ **Resource:** driftguard-web-sg
+🌍 **Region:** ap-south-1
+
+🔓 **Reason:** ${reason}
+
+🚫 **Security Gate:** BUILD BLOCKED
+🔧 **Jenkins Build:** #${env.BUILD_NUMBER}
+"""
 
                         withCredentials([
                             string(
@@ -238,28 +247,13 @@ pipeline {
                             )
                         ]) {
 
-                            def message = """🚨 DRIFTGUARD SECURITY ALERT
-
-Status: DRIFT DETECTED
-
-Resource: driftguard-web-sg
-Region: ap-south-1
-
-Risk Level: ${level}
-Risk Score: ${score}
-
-Reason:
-Public inbound access detected
-
-Jenkins Build #${BUILD_NUMBER}
-
-🔴 Security Gate blocked this build."""
+                            def payload = groovy.json.JsonOutput.toJson([
+                                content: message
+                            ])
 
                             writeFile(
                                 file: 'discord.json',
-                                text: groovy.json.JsonOutput.toJson([
-                                    content: message
-                                ])
+                                text: payload
                             )
 
                             bat '''
@@ -270,11 +264,12 @@ Jenkins Build #${BUILD_NUMBER}
                             '''
                         }
 
-                        echo "Discord alert sent successfully."
+                        echo 'Discord alert sent successfully.'
 
                     } else {
 
-                        echo "NO_DRIFT - Discord skipped."
+                        echo 'NO_DRIFT - Discord skipped.'
+
                     }
                 }
             }
@@ -286,40 +281,47 @@ Jenkins Build #${BUILD_NUMBER}
 
                     def status = bat(
                         script: '''
-                            @venv\\Scripts\\python -c "import json;d=json.load(open('reports/drift_report.json'));print(d['status'])"
+                            @venv\\Scripts\\python -c "import json; print(json.load(open('reports/drift_report.json'))['status'])"
                         ''',
                         returnStdout: true
                     ).trim()
 
                     def level = bat(
                         script: '''
-                            @venv\\Scripts\\python -c "import json;d=json.load(open('reports/drift_report.json'));print(d['risk']['level'])"
+                            @venv\\Scripts\\python -c "import json; print(json.load(open('reports/drift_report.json'))['risk']['level'])"
                         ''',
                         returnStdout: true
                     ).trim()
 
                     def score = bat(
                         script: '''
-                            @venv\\Scripts\\python -c "import json;d=json.load(open('reports/drift_report.json'));print(d['risk']['score'])"
+                            @venv\\Scripts\\python -c "import json; print(json.load(open('reports/drift_report.json'))['risk']['score'])"
                         ''',
                         returnStdout: true
                     ).trim()
 
-                    echo "========================================"
-                    echo "         SECURITY GATE"
-                    echo "========================================"
+                    echo '''
+========================================
+         SECURITY GATE
+========================================
+'''
+
                     echo "Status      : ${status}"
                     echo "Risk Level  : ${level}"
                     echo "Risk Score  : ${score}"
-                    echo "========================================"
 
-                    if(status == 'DRIFT_DETECTED') {
+                    echo '========================================'
 
-                        error("SECURITY GATE BLOCKED BUILD - ${level} Risk (${score})")
+                    if (status == 'DRIFT_DETECTED') {
+
+                        error(
+                            "SECURITY GATE BLOCKED BUILD - ${level} Risk (${score})"
+                        )
 
                     } else {
 
-                        echo "Security Gate PASSED"
+                        echo 'Security Gate PASSED'
+
                     }
                 }
             }
@@ -330,24 +332,24 @@ Jenkins Build #${BUILD_NUMBER}
 
         always {
 
-            archiveArtifacts artifacts: 'reports/drift_report.json',
-                             allowEmptyArchive: true
+            archiveArtifacts(
+                artifacts: 'reports/drift_report.json',
+                allowEmptyArchive: true
+            )
 
             bat '''
-                if exist discord.json del /f /q discord.json
+                @if exist discord.json del /f /q discord.json
             '''
 
-            echo "DriftGuard pipeline execution completed."
+            echo 'DriftGuard pipeline execution completed.'
         }
 
         success {
-
-            echo "BUILD SUCCESS"
+            echo 'BUILD SUCCESS'
         }
 
         failure {
-
-            echo "BUILD BLOCKED DUE TO DRIFT"
+            echo 'BUILD BLOCKED DUE TO DRIFT'
         }
     }
 }
